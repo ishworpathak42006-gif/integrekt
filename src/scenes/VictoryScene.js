@@ -113,14 +113,15 @@ export class VictoryScene extends Phaser.Scene {
             this.sound.play('vs_select', {
                 volume: 0.5,
                 rate: 1.0,
-                delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
+                delay: 0
             });
 
-
             // ✅ Prevent multiple clicks
-            this.playButton.disableInteractive();
-            //Stop any sounds
+            btn.disableInteractive();
+
+            // Stop any sounds
             this.sound.stopAll();
+
             // Fade out screen for smooth transition
             this.cameras.main.fadeOut(150, 0, 0, 0);
 
@@ -128,6 +129,7 @@ export class VictoryScene extends Phaser.Scene {
                 this.scene.start('GameScene');
             });
         });
+
     }
     update() {
         this.bgSky.tilePositionX      += 0.03;
