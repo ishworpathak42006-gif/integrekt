@@ -111,7 +111,7 @@ export class VictoryScene extends Phaser.Scene {
         // --- Click to restart ---
         btn.on('pointerdown', () => {
             this.sound.play('vs_select', {
-                volume: 0.5,
+                volume: 1.0,
                 rate: 1.0,
                 delay: 0
             });

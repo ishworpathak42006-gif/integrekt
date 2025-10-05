@@ -804,7 +804,7 @@ export class GameScene extends Phaser.Scene {
             if (ans.correct) {
                 //Play Right Sound
                 this.sound.play('right_sound', {
-                    volume: 0.5,
+                    volume: 1.0,
                     rate: 1.0,
                     delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
                 });
@@ -930,7 +930,7 @@ export class GameScene extends Phaser.Scene {
             else {
                     //Play Wrong Sound
                 this.sound.play('wrong_sound', {
-                    volume: 0.5,
+                    volume: 1.0,
                     rate: 1.0,
                     delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
                 });
@@ -963,6 +963,17 @@ export class GameScene extends Phaser.Scene {
 
     // --- Timer expiry (auto wrong) ---
     this.questionTimer = this.time.delayedCall(20000, () => {
+        // --- STOP tick sound ---
+                if (this.clock && this.clock.isPlaying) {
+                    this.clock.stop();
+                }
+        //Play Wrong Sound
+                this.sound.play('wrong_sound', {
+                    volume: 1.0,
+                    rate: 1.0,
+                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
+                });
+
         this.table_bcg.setTint(0xA03D3D).setAlpha(0.5);
         shuffled.forEach((ans, idx) => {
             if (ans.correct) this.answerImages[idx].setTint(0x7AA150);

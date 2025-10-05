@@ -5,9 +5,9 @@ export class GameOverScene extends Phaser.Scene {
 
     preload() {
         // Load background assets (same as GameScene)
-        this.load.image('sky', 'assets/Game_Over/Adjusted/1.png');
-        this.load.image('clouds', 'assets/Game_Over/Adjusted/2.png');
-        this.load.image('clouds_2', 'assets/Game_Over/Adjusted/3.png');
+        this.load.image('go_sky', 'assets/Game_Over/Adjusted/1.png');
+        this.load.image('go_clouds', 'assets/Game_Over/Adjusted/2.png');
+        this.load.image('go_clouds_2', 'assets/Game_Over/Adjusted/3.png');
         this.load.font('JesusHeals', 'assets/Fonts/Jesus_Heals_W00_Regular.ttf');
         this.load.font('PressStart2P', 'assets/Fonts/PressStart2P-Regular.ttf');
         this.load.audio('vs_select', 'assets/Sounds/Select.wav');
@@ -29,9 +29,9 @@ export class GameOverScene extends Phaser.Scene {
         // Fade in scene from black over 500 ms
         this.cameras.main.fadeIn(500, 0, 0, 0);
         // --- Background ---
-        this.bgSky = this.add.tileSprite(640, 360, 1280, 720, 'sky').setDepth(0);
-        this.bgClouds = this.add.tileSprite(640, 360, 1280, 720, 'clouds').setDepth(1);
-        this.fgClouds = this.add.tileSprite(640, 360, 1280, 720, 'clouds_2').setDepth(2);
+        this.bgSky = this.add.tileSprite(640, 360, 1280, 720, 'go_sky').setDepth(0);
+        this.bgClouds = this.add.tileSprite(640, 360, 1280, 720, 'go_clouds').setDepth(1);
+        this.fgClouds = this.add.tileSprite(640, 360, 1280, 720, 'go_clouds_2').setDepth(2);
 
         
 
@@ -109,7 +109,7 @@ export class GameOverScene extends Phaser.Scene {
                 // --- Click to restart ---
         btn.on('pointerdown', () => {
             this.sound.play('vs_select', {
-                volume: 0.5,
+                volume: 1.0,
                 rate: 1.0,
                 delay: 0
             });
