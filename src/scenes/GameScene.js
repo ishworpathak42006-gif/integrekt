@@ -155,6 +155,7 @@ export class GameScene extends Phaser.Scene {
     create() {
         this.sceneTransitioning = false;
         this.enemyHasAttacked = false;
+        this.isHardQuestion = false;
         // --- Initialize variables ---
         this.answerImages = [];      
         // Reset game state
@@ -963,6 +964,8 @@ export class GameScene extends Phaser.Scene {
         poolArr = this.availableEasy;  // working easy queue (consumable)
         prefix = 'qe';
     }
+    // Track current question difficulty
+    this.isHardQuestion = isHard;
 
     // Refill & shuffle if we consumed entire stack
     if (poolArr.length === 0) {
@@ -1149,10 +1152,15 @@ export class GameScene extends Phaser.Scene {
                     rate: 1.0,
                     delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
                 });
+                // Reset hero MP if the question was hard
+                if (this.isHardQuestion) {
+                    this.heroMPValue = 0;
+                    this.heroMP.setFrame(this.heroMPValue);
+                }
                 
                 this.enemyHasAttacked = true; 
                 this.enemyAttack();
-                    this.checkGameStatus();
+                this.checkGameStatus();
                 }
             
 
