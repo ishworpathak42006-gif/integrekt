@@ -1,8 +1,6 @@
 export class GameScene extends Phaser.Scene {
     constructor() {
         super("GameScene");
-        this.heroDead = false;
-        this.enemyDead = false;
     }
 
     preload() {
@@ -155,6 +153,26 @@ export class GameScene extends Phaser.Scene {
     }
 
     create() {
+        this.sceneTransitioning = false;
+        this.enemyHasAttacked = false;
+        // --- Initialize variables ---
+        this.answerImages = [];      
+        // Reset game state
+        this.heroDead = false;
+        this.enemyDead = false;
+        this.inputLocked = false;
+        this.heroHP = 0;
+        this.enemyHP = 0;
+        this.heroMPValue = 0;
+        this.enemyMPValue = 0;
+
+        // Reset UI frames
+        if (this.heroHealth) this.heroHealth.setFrame(this.heroHP);
+        if (this.enemyHealth) this.enemyHealth.setFrame(this.enemyHP);
+        if (this.heroMP) this.heroMP.setFrame(this.heroMPValue);
+        if (this.enemyMP) this.enemyMP.setFrame(this.enemyMPValue);
+
+
         // --- Stop any existing main menu music before creating a new one ---
         const existingMusic = this.sound.get('main_menu_audio');
         if (existingMusic) {
@@ -332,19 +350,34 @@ export class GameScene extends Phaser.Scene {
 
         // --- Enemy Attack Timer ---
         this.time.addEvent({
-            delay: Phaser.Math.Between(5000, 15000), // 5–15 seconds
+            delay: Phaser.Math.Between(15000, 18000), // 5–15 seconds
             loop: true,
-            callback: this.enemyAttack,
+            callback: () => {
+                if (!this.enemyHasAttacked) {
+                    this.enemyAttack();
+                    this.enemyHasAttacked = true; // mark that it attacked automatically
+                }
+            },
             callbackScope: this
         });
 
 
-        // --- Q&A system setup ---
-        this.currentQuestion = null;
-        this.answerImages = [];
-        this.easyPool = Array.from({ length: 20 }, (_, i) => i + 1);
-        this.hardPool = Array.from({ length: 11 }, (_, i) => i + 1);
+                // --- Q&A system setup ---
+        // full pools (unchanging)
+        this.fullEasyPool = Array.from({ length: 20 }, (_, i) => i + 1);
+        this.fullHardPool = Array.from({ length: 11 }, (_, i) => i + 1);
+
+        // working available queues (we will consume from these)
+        this.availableEasy = this.fullEasyPool.slice();
+        this.availableHard = this.fullHardPool.slice();
+
+        // randomize available queues once to start
+        this.shuffleArray(this.availableEasy);
+        this.shuffleArray(this.availableHard);
+
+        // last shown question index (to avoid immediate repeats)
         this.lastQuestion = null;
+
 
         // Delay first question
         this.time.delayedCall(50, () => {
@@ -391,14 +424,14 @@ export class GameScene extends Phaser.Scene {
             repeat: 0
         });
 
-        //Special Fireballs Flags
-        this.heroImpactTriggered = false;
-        this.enemyImpactTriggered = false;
-
 
          // Groups
         this.heroFireballs = this.physics.add.group();
         this.enemyFireballs = this.physics.add.group();
+
+        //Special Fireballs Groups
+        this.specialheroFireballs = this.physics.add.group();
+        this.specialenemyFireballs = this.physics.add.group();
 
         //Adding Hitboxes
         this.heroHitbox= this.physics.add.group(); //200, 250
@@ -441,7 +474,6 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.heroFireballs, this.enemyHitbox, (fireball, hitbox) => {
             fireball.destroy();
             hitbox.destroy();
-            console.log("Enemy hit!");
             //Update enemy HP
             this.enemyHP = Math.min(this.enemyHP + 1, 7); // normal attack: +1
             this.enemyHealth.setFrame(this.enemyHP);
@@ -457,17 +489,8 @@ export class GameScene extends Phaser.Scene {
                     this.enemy.play('enemy_idle');
                 });
             } else if (this.enemyHP === 7) {
-                this.enemy.play('enemy_death');
-                // Stop all currently playing sounds
-                this.sound.stopAll();
-                this.sound.play('death_sound', {
-                    volume: 0.5,
-                    rate: 1,
-                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                });
-                this.enemy.once('animationcomplete-enemy_death', () => {
-                    this.checkGameStatus();
-                });
+                // Check for game over
+                this.checkGameStatus();
             }
                 // **Add floating text here**
                 const damageText = this.add.text(
@@ -508,7 +531,6 @@ export class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.enemyFireballs, this.heroHitbox, (fireball, hitbox) => {
             fireball.destroy();
             hitbox.destroy();            
-            console.log("Hero hit!");
             //Update hero HP
             this.heroHP = Math.min(this.heroHP + 1, 7); // normal attack: +1
             this.heroHealth.setFrame(this.heroHP);
@@ -525,20 +547,8 @@ export class GameScene extends Phaser.Scene {
                     this.hero.play('hero_idle');
                 });
             } else if (this.heroHP === 7) {
-                this.hero.play('hero_death');
-                // Stop all currently playing sounds
-                this.sound.stopAll();
-                this.sound.play('death_sound', {
-                    volume: 0.5,
-                    rate: 1,
-                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                });
-
-
-                this.hero.once('animationcomplete-hero_death', () => {
                 // Check for game over
                 this.checkGameStatus();
-                });
             }
             // **Add floating text here**
                 const damageText = this.add.text(
@@ -574,6 +584,144 @@ export class GameScene extends Phaser.Scene {
                 });
         });
 
+         // --- Collisions ---
+        // Speicial Fireball vs Special Fireball
+        this.physics.add.overlap(this.specialheroFireballs, this.specialenemyFireballs, (heroFb, enemyFb) => {
+                // Calculate midpoint
+            const x = (heroFb.x + enemyFb.x) / 2;
+             const y = (heroFb.y + enemyFb.y) / 2;
+
+            //Destroy both fireballs
+                heroFb.destroy();
+                enemyFb.destroy();
+            // Add and play spark animation
+                const spark = this.add.sprite(x, y, 'spark')
+                    .setScale(2)
+                    .setDepth(20)
+                    .play('spark_flash');
+
+                // 💥 Play explosion sound
+                this.sound.play('explosion', {
+                    volume: 0.5, // adjust as needed
+                    rate: 1.2,
+                    delay: 0.2  // delay in seconds (e.g., 0.2s = 200ms)
+                });
+
+                // Auto-destroy after animation
+                spark.on('animationcomplete', () => {
+                    spark.destroy();
+                });   
+            });     
+
+    // Hero special fireball hits enemy
+        this.physics.add.overlap(this.specialheroFireballs, this.enemyHitbox, (fireball, hitbox) => {
+            fireball.destroy();
+            hitbox.destroy();
+            //Update enemy HP
+            this.enemyHP = Math.min(this.enemyHP + 2, 7); // normal attack: +1
+            this.enemyHealth.setFrame(this.enemyHP);
+            // Play animation based on HP
+            if (this.enemyHP < 7) {
+                                        this.enemy.play('enemy_impact_two');
+                                        this.sound.play('special_impact_sound', {
+                                            volume: 0.5,
+                                            rate: 1.1,
+                                            delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
+                                        });
+
+                                    } else if (this.enemyHP === 7) {
+                                        // Check for game over
+                                        this.checkGameStatus();
+                                    }
+                                        // **Add floating text here**
+                                        const damageText = this.add.text(
+                                            this.enemy.x, this.enemy.y - 80, // slightly above enemy
+                                            'CRIT!', 
+                                            {
+
+                                                fontFamily: 'JesusHeals',
+                                                fontSize: '24px',
+                                                color: '#FF4E50',
+                                                stroke: '#4A0000',
+                                                strokeThickness: 6,
+                                                shadow: {
+                                                    offsetX: 2,
+                                                    offsetY: 2,
+                                                    color: '#000000',
+                                                    blur: 0,
+                                                    fill: true
+                                                }
+                                            }
+                                        ).setOrigin(0.5).setDepth(30);
+
+                                        // **Optional: make text float and fade**
+                                        this.tweens.add({
+                                            targets: damageText,
+                                            y: damageText.y - 30,
+                                            alpha: 0,
+                                            duration: 2000,
+                                            ease: 'Cubic.easeOut',
+                                            onComplete: () => {
+                                                damageText.destroy();
+                                            }
+                                        });  
+            
+              });
+
+        // Enemy special fireball hits hero
+        this.physics.add.overlap(this.specialenemyFireballs, this.heroHitbox, (fireball, hitbox) => {
+            fireball.destroy();
+            hitbox.destroy();            
+            //Update hero HP
+            this.heroHP = Math.min(this.heroHP + 2, 7); // special attack: +2
+            this.heroHealth.setFrame(this.heroHP);
+            // add your HP/animation logic here
+           // Hero hit
+            if (this.heroHP < 7) {
+                                this.hero.play('hero_impact_one');
+                                this.sound.play('special_impact_sound', {
+                                    volume: 0.5,
+                                    rate: 1.1,
+                                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
+                                });
+                            } else if (this.heroHP === 7) {
+                                // Check for game over
+                                this.checkGameStatus();
+                            }
+                                        // **Add floating text here**
+                            const damageText = this.add.text(
+                                this.hero.x, this.hero.y - 80, // slightly above enemy
+                                'AHH!', 
+                                {
+
+                                    fontFamily: 'JesusHeals',
+                                    fontSize: '24px',
+                                    color: '#00FFFF',
+                                    stroke: '#004C4C',
+                                    strokeThickness: 6,
+                                    shadow: {
+                                        offsetX: 2,
+                                        offsetY: 2,
+                                        color: '#000000',
+                                        blur: 0,
+                                        fill: true
+                                    }
+                                }
+                            ).setOrigin(0.5).setDepth(30);
+
+                            // **Optional: make text float and fade**
+                            this.tweens.add({
+                                targets: damageText,
+                                y: damageText.y - 30,
+                                alpha: 0,
+                                duration: 2000,
+                                ease: 'Cubic.easeOut',
+                                onComplete: () => {
+                                    damageText.destroy();
+                                }
+                            });
+        });
+
         //Sounds
         this.clock = this.sound.add('clock');
         this.warningTimer = null;
@@ -581,31 +729,63 @@ export class GameScene extends Phaser.Scene {
     }
 
     checkGameStatus() {
-        // Hero death → GameOverScene
-        if (this.heroHP >= 7 && !this.heroDead) {
+
+
+        // --- HERO DEATH ---
+        if (this.heroHP >= 7) {
+            // Stop all timers or repeating events
+            if (this.enemyAttackTimer) this.enemyAttackTimer.remove(false);
+            if (this.warningTimer) this.warningTimer.remove(false);
+
+            // Prevent further interactions
+            this.inputLocked = true;
+
+            // --- Prevent multiple scene transitions ---
+            if (this.sceneTransitioning) return;
+            this.sceneTransitioning = true;
             this.heroDead = true;
+            this.enemyHasAttacked = true; // stop enemy logic too
 
-            // Fade out music before switching scene
-            this.tweens.add({
-                targets: this.gs_themeMusic,
-                volume: 0,
-                duration: 150,
-                ease: 'Linear',
-                onComplete: () => this.gs_themeMusic.stop()
+            // Stop all sounds, play death sound
+            this.sound.stopAll();
+            this.sound.play('death_sound', { volume: 0.5, rate: 1 });
+
+            // Play animation and transition after it completes
+            this.hero.play('hero_death');
+            this.hero.once('animationcomplete-hero_death', () => {
+                this.fadeOutToScene('GameOverScene');
             });
-
-            // Fade out screen for smooth transition
-            this.cameras.main.fadeOut(150, 0, 0, 0);
-
-            this.time.delayedCall(150, () => {
-                this.scene.start('GameOverScene');
-            });
+            return; // stop further checks
         }
 
-        // Enemy death → VictoryScene
-        if (this.enemyHP >= 7 && !this.enemyDead) {
+        // --- ENEMY DEATH ---
+        if (this.enemyHP >= 7) {
+            // Stop all timers or repeating events
+            if (this.enemyAttackTimer) this.enemyAttackTimer.remove(false);
+            if (this.warningTimer) this.warningTimer.remove(false);
+
+            // Prevent further interactions
+            this.inputLocked = true;
+
+            // --- Prevent multiple scene transitions ---
+            if (this.sceneTransitioning) return;
+            this.sceneTransitioning = true;
             this.enemyDead = true;
 
+            this.sound.stopAll();
+            this.sound.play('death_sound', { volume: 0.5, rate: 1 });
+
+            this.enemy.play('enemy_death');
+            this.enemy.once('animationcomplete-enemy_death', () => {
+                this.fadeOutToScene('VictoryScene');
+            });
+            return;
+        }
+    }
+
+    fadeOutToScene(targetScene) {
+        // Fade out music if playing
+        if (this.gs_themeMusic && this.gs_themeMusic.isPlaying) {
             this.tweens.add({
                 targets: this.gs_themeMusic,
                 volume: 0,
@@ -613,16 +793,18 @@ export class GameScene extends Phaser.Scene {
                 ease: 'Linear',
                 onComplete: () => this.gs_themeMusic.stop()
             });
-
-            // Fade out screen for smooth transition
-            this.cameras.main.fadeOut(150, 0, 0, 0);
-
-            this.time.delayedCall(150, () => {
-                this.scene.start('VictoryScene');
-            });
-            
         }
+
+        // Fade out screen for smooth transition
+        this.cameras.main.fadeOut(150, 0, 0, 0);
+
+        // Wait a bit, then switch scene
+        this.time.delayedCall(150, () => {
+            this.scene.start(targetScene);
+        });
     }
+
+
 
 
     spawnHeroFireball(x, y) {
@@ -662,12 +844,63 @@ export class GameScene extends Phaser.Scene {
         });
         }
 
+    spawnSpecialHeroFireball(x, y) {
+        let fb = this.specialheroFireballs.create(x, y, 'hero_special_fireball');
+        fb.setScale(2);
+        fb.setDepth(10);
+        fb.body.setVelocityX(100); // moves right
+        fb.setCircle(fb.width/2); // circular collision
+        fb.play('special_fireball_flicker'); // animation key
+        
+        // Stationary hitbox as rectangle
+        let fbHitbox = this.enemyHitbox.create(1280-200, 250, 'enemy_hitbox');
+        fbHitbox.body.setSize(fbHitbox.width, fbHitbox.height); // rectangle matches sprite size
+        fbHitbox.body.setImmovable(true); // stay in place
 
-    shuffleArray(arr) {
-        return arr.sort(() => Math.random() - 0.5);
+        // --- Cleanup hitbox after 10 seconds ---
+        this.time.delayedCall(10000, () => {
+            if (fbHitbox && fbHitbox.active) fbHitbox.destroy();
+        });
+
     }
 
+    spawnSpecialEnemyFireball(x, y) {
+        let fb = this.specialenemyFireballs.create(x, y, 'enemy_special_fireball');
+        fb.setScale(2);
+        fb.setDepth(10);
+        fb.body.setVelocityX(-100); // moves left
+        fb.setCircle(fb.width/2);
+        fb.play('enemy_special_fireball_flicker'); // animation key
+
+        // Stationary hitbox as rectangle
+        let fbHitbox = this.heroHitbox.create(200, 250, 'enemy_hitbox');
+        fbHitbox.body.setSize(fbHitbox.width, fbHitbox.height); // rectangle matches sprite size
+        fbHitbox.body.setImmovable(true); // stay in place
+
+        // --- Cleanup hitbox after 10 seconds ---
+        this.time.delayedCall(10000, () => {
+            if (fbHitbox && fbHitbox.active) fbHitbox.destroy();
+        });
+        }
+
+
+        // Fisher-Yates in-place shuffle — reliably random
+    shuffleArray(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const tmp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = tmp;
+        }
+        return arr;
+    }
+
+
     showQuestion() {
+    this.checkGameStatus();
+    // --- Reset enemy attack flag for this round ---
+    this.enemyHasAttacked = false;
+
     // --- Cleanup previous question/answers/timers ---
     if (this.currentQuestion) this.currentQuestion.destroy();
     this.answerImages.forEach(img => img.destroy());
@@ -720,23 +953,55 @@ export class GameScene extends Phaser.Scene {
                 
     }
 
-    // --- Decide difficulty based on MP ---
-    let pool, prefix, isHard = false;
-    if (this.heroMPValue >= this.heroMPMax) {
-        pool = this.hardPool;  // hard questions
+        // --- Decide difficulty based on MP ---
+    let poolArr, prefix, isHard = false;
+    if (this.heroMPValue==this.heroMPMax) {
+        poolArr = this.availableHard;  // working hard queue (consumable)
         prefix = 'qh';
         isHard = true;
     } else {
-        pool = this.easyPool;  // easy questions
+        poolArr = this.availableEasy;  // working easy queue (consumable)
         prefix = 'qe';
     }
 
-    // --- Pick random question, avoid repeat ---
-    let qIndex;
-    do {
-        qIndex = pool[Math.floor(Math.random() * pool.length)];
-    } while (qIndex === this.lastQuestion && pool.length > 1);
-    this.lastQuestion = qIndex;
+    // Refill & shuffle if we consumed entire stack
+    if (poolArr.length === 0) {
+        if (isHard) {
+            this.availableHard = this.fullHardPool.slice();
+            this.shuffleArray(this.availableHard);
+            poolArr = this.availableHard;
+        } else {
+            this.availableEasy = this.fullEasyPool.slice();
+            this.shuffleArray(this.availableEasy);
+            poolArr = this.availableEasy;
+        }
+
+        // Avoid starting the fresh shuffled queue with the same as lastQuestion if possible
+        if (poolArr.length > 1 && poolArr[0] === this.lastQuestion) {
+            // swap first and second
+            const tmp = poolArr[0];
+            poolArr[0] = poolArr[1];
+            poolArr[1] = tmp;
+        }
+    }
+
+    // Pop the next question from the front of the working queue
+    let qIndex = poolArr.shift();
+
+    // // Extra-care: if we accidentally still got lastQuestion and there's alternatives, pick one
+    // if (qIndex === this.lastQuestion && poolArr.length > 0) {
+    //     // find first different one
+    //     const idx = poolArr.findIndex(x => x !== this.lastQuestion);
+    //     if (idx !== -1) {
+    //         const next = poolArr.splice(idx, 1)[0];
+    //         // put previous back into the pool to avoid losing it (optional)
+    //         poolArr.push(qIndex);
+    //         qIndex = next;
+    //     }
+    // }
+
+    // this.lastQuestion = qIndex;
+
 
     // --- Show question image ---
     const questionY = 459, tableX = 640;
@@ -785,8 +1050,8 @@ export class GameScene extends Phaser.Scene {
                     this.clock.stop();
                 }
             
-            
-            if (this.inputLocked) return; // ignore clicks when locked
+             // --- Prevent any interaction if game is ending or input is locked ---
+            if (this.inputLocked || this.heroDead || this.enemyDead) return;
             this.inputLocked = true; // lock input immediately
 
             if (this.questionTimer) this.questionTimer.remove(false);
@@ -820,112 +1085,62 @@ export class GameScene extends Phaser.Scene {
 
                     this.time.delayedCall(800, () => this.spawnHeroFireball(this.hero.x+90, this.hero.y-33), []);
                     this.hero.once('animationcomplete-hero_attack', () => {
-                        this.hero.play('hero_idle');
+                        if (!this.heroDead && !this.enemyDead) this.hero.play('hero_idle');
                     });
 
                     // Increase MP
                     this.heroMPValue++;
                     this.heroMP.setFrame(this.heroMPValue);
 
-                } 
-                // --- Special attack if MP is full ---
-                else {
-                    this.hero.play('hero_attack_two');
-
-                    // Special Fireball effect after short delay
-                    this.time.delayedCall(500, () => {
-                        const fireball = this.add.sprite(this.hero.x + 90, this.hero.y - 20, 'hero_attack_two')
-                            .setScale(2)
-                            .setDepth(10)
-                            .play('special_fireball_flicker');
-
-                        this.sound.play('charge_sound', {
-                            volume: 0.5,
-                            rate: 0.75,
-                            delay: 0.1   // delay in seconds (e.g., 0.2s = 200ms)
-                        });
-
-                        // --- Charge-up: fireball stays in place for 800ms ---
-                        this.time.delayedCall(800, () => {
-                            // Start moving fireball toward enemy
-                            this.tweens.add({
-                                targets: fireball,
-                                x: this.enemy.x - 20,
-                                y: this.enemy.y - 20,
-                                duration: 5000,
-                                onComplete: () => {
-                                    // Play animation based on HP
-                                    if (this.enemyHP < 7) {
-                                        this.enemy.play('enemy_impact_two');
-                                        this.sound.play('special_impact_sound', {
-                                            volume: 0.5,
-                                            rate: 1.1,
-                                            delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                                        });
-
-                                    } else if (this.enemyHP === 7) {
-                                        this.enemy.play('enemy_death');
-                                        // Stop all currently playing sounds
-                                        this.sound.stopAll();
-                                        this.sound.play('death_sound', {
-                                            volume: 0.5,
-                                            rate: 1,
-                                            delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                                        });
-                                        this.enemy.once('animationcomplete-enemy_death', () => {
-                                        // Check for game over
-                                        this.checkGameStatus();
-                                        });
-                                    }
-                                        // **Add floating text here**
-                                        const damageText = this.add.text(
-                                            this.enemy.x, this.enemy.y - 80, // slightly above enemy
-                                            'CRIT!', 
-                                            {
-
-                                                fontFamily: 'JesusHeals',
-                                                fontSize: '24px',
-                                                color: '#FF4E50',
-                                                stroke: '#4A0000',
-                                                strokeThickness: 6,
-                                                shadow: {
-                                                    offsetX: 2,
-                                                    offsetY: 2,
-                                                    color: '#000000',
-                                                    blur: 0,
-                                                    fill: true
-                                                }
-                                            }
-                                        ).setOrigin(0.5).setDepth(30);
-
-                                        // **Optional: make text float and fade**
-                                        this.tweens.add({
-                                            targets: damageText,
-                                            y: damageText.y - 30,
-                                            alpha: 0,
-                                            duration: 2000,
-                                            ease: 'Cubic.easeOut',
-                                            onComplete: () => {
-                                                damageText.destroy();
-                                            }
-                                        });                                       
-                                    fireball.destroy();
-                                    this.enemyHP = Math.min(this.enemyHP + 2, 7);
-                                    this.enemyHealth.setFrame(this.enemyHP);
-                                }
-                            });
-
-                        });
-                    });
-
-                    this.hero.once('animationcomplete-hero_attack_two', () => {
-                        this.hero.play('hero_idle');
-                    });
-                    // Reset hero MP after special move
-                    this.heroMPValue = 0;
-                    this.heroMP.setFrame(this.heroMPValue);
                 }
-            } 
+             
+            // --- Special attack if MP is full ---
+            else {
+                this.hero.play('hero_attack_two');
+
+                // Special Fireball effect after short delay
+                this.time.delayedCall(500, () => {
+                    if (this.heroDead || this.enemyDead) return; // prevent any effect if game over
+
+                    const sp_fireball = this.add.sprite(this.hero.x + 90, this.hero.y - 20, 'special_fireball')
+                        .setScale(2)
+                        .setDepth(10)
+                        .play('special_fireball_flicker');
+
+                    this.sound.play('charge_sound', {
+                        volume: 0.5,
+                        rate: 0.75,
+                        delay: 0.1
+                    });
+
+                    // --- Charge-up: fireball stays in place for 800ms ---
+                    this.time.delayedCall(800, () => {
+                        if (this.heroDead || this.enemyDead) {
+                            sp_fireball.destroy();
+                            return;
+                        }
+
+                        sp_fireball.destroy(); // remove charge-up flicker
+
+                        // Spawn the actual moving special fireball
+                        this.spawnSpecialHeroFireball(this.hero.x + 90, this.hero.y - 33);
+
+                        // When attack animation finishes, return to idle (if still alive)
+                        this.hero.once('animationcomplete-hero_attack_two', () => {
+                            if (!this.heroDead && !this.enemyDead) {
+                                this.hero.play('hero_idle');
+                            }
+                        });
+
+                        
+                    });
+                });
+                // Reset hero MP after special move
+                this.heroMPValue = 0;
+                this.heroMP.setFrame(this.heroMPValue);
+            }
+            }
+
             // --- On incorrect answer ---
             else {
                     //Play Wrong Sound
@@ -934,18 +1149,16 @@ export class GameScene extends Phaser.Scene {
                     rate: 1.0,
                     delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
                 });
-                        // Reset MP if hard question
-                    if (isHard) {
-                        this.heroMPValue = 0;
-                        this.heroMP.setFrame(this.heroMPValue);
-                    }
-
+                
+                this.enemyHasAttacked = true; 
+                this.enemyAttack();
                     this.checkGameStatus();
                 }
             
 
            // Reset & show next question
             this.time.delayedCall(1000, () => {
+                if (this.heroDead || this.enemyDead) return; // 💥 Prevent spawning new questions
                 this.table_bcg.clearTint().setAlpha(1);
                 this.inputLocked = false; // 🔓 unlock for next round
                 this.showQuestion();
@@ -989,7 +1202,9 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(1000, () => {
             this.table_bcg.clearTint().setAlpha(1);
             this.showQuestion();
+            this.enemyAttack();
         });
+        
         
     });
         // --- Hourglass dynamic warning (after 15s) ---
@@ -1060,112 +1275,50 @@ export class GameScene extends Phaser.Scene {
             this.enemyMP.setFrame(this.enemyMPValue);
 
         } else {
-            // --- Special attack ---
-            this.enemy.play('enemy_attack_two');
-            
+                this.enemy.play('enemy_attack_two');
 
-            this.time.delayedCall(500, () => {
-                const fireball = this.add.sprite(this.enemy.x - 90, this.enemy.y - 20, 'enemy_special_fireball')
-                    .setScale(2)
-                    .setDepth(9)
-                    .play('enemy_special_fireball_flicker');
+                // Special Fireball effect after short delay
+                this.time.delayedCall(500, () => {
+                    if (this.heroDead || this.enemyDead) return; // prevent any effect if game over
 
-                this.sound.play('charge_sound', {
-                            volume: 0.5,
-                            rate: 0.75,
-                            delay: 0.1   // delay in seconds (e.g., 0.2s = 200ms)
-                        });
+                    const sp_fireball = this.add.sprite(this.enemy.x - 90, this.enemy.y - 20, 'enemy_special_fireball')
+                        .setScale(2)
+                        .setDepth(10)
+                        .play('enemy_special_fireball_flicker');
 
-                // --- Charge-up: fireball stays in place for 800ms ---
-                this.time.delayedCall(800, () => {
-                    this.tweens.add({
-                        targets: fireball,
-                        x: this.hero.x + 20,
-                        y: this.hero.y - 20,
-                        duration: 5000,
-                        onComplete: () => {
-                            // Play impact animation once when the fireball reaches the hero
-                            
-                            if (this.heroHP < 7) {
-                                this.hero.play('hero_impact_one');
-                                this.sound.play('special_impact_sound', {
-                                    volume: 0.5,
-                                    rate: 1.1,
-                                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                                });
-                            } else if (this.heroHP === 7) {
-                                this.hero.play('hero_death');
-                                // Stop all currently playing sounds
-                                this.sound.stopAll();
-                                this.sound.play('death_sound', {
-                                    volume: 0.5,
-                                    rate: 1,
-                                    delay: 0   // delay in seconds (e.g., 0.2s = 200ms)
-                                });
-
-                                this.hero.once('animationcomplete-hero_death', () => {
-                                    // Check for game over
-                                    this.checkGameStatus();
-                                });
-                            }
-                                        // **Add floating text here**
-                            const damageText = this.add.text(
-                                this.hero.x, this.hero.y - 80, // slightly above enemy
-                                'AHH!', 
-                                {
-
-                                    fontFamily: 'JesusHeals',
-                                    fontSize: '24px',
-                                    color: '#00FFFF',
-                                    stroke: '#004C4C',
-                                    strokeThickness: 6,
-                                    shadow: {
-                                        offsetX: 2,
-                                        offsetY: 2,
-                                        color: '#000000',
-                                        blur: 0,
-                                        fill: true
-                                    }
-                                }
-                            ).setOrigin(0.5).setDepth(30);
-
-                            // **Optional: make text float and fade**
-                            this.tweens.add({
-                                targets: damageText,
-                                y: damageText.y - 30,
-                                alpha: 0,
-                                duration: 2000,
-                                ease: 'Cubic.easeOut',
-                                onComplete: () => {
-                                    damageText.destroy();
-                                }
-                            });
-
-                            // Destroy the fireball
-                            fireball.destroy();
-
-                            // Update hero HP
-                            this.heroHP = Math.min(this.heroHP + 2, 7); // special attack: +2
-                            this.heroHealth.setFrame(this.heroHP);
-
-                            // Reset the impact flag (optional, safe to remove if not used elsewhere)
-                            this.enemyImpactTriggered = false;
-
-                            
-                        }
+                    this.sound.play('charge_sound', {
+                        volume: 0.5,
+                        rate: 0.75,
+                        delay: 0.1
                     });
 
-                });
-            });
-               this.enemy.once('animationcomplete-enemy_attack_two', () => {
-                    this.enemy.play('enemy_idle');
-                });
+                    // --- Charge-up: fireball stays in place for 800ms ---
+                    this.time.delayedCall(800, () => {
+                        if (this.heroDead || this.enemyDead) {
+                            sp_fireball.destroy();
+                            return;
+                        }
 
-            // Reset enemy MP after special move
-            this.enemyMPValue = 0;
-            this.enemyMP.setFrame(this.enemyMPValue);
-        }
+                        sp_fireball.destroy(); // remove charge-up flicker
 
+                        // Spawn the actual moving special fireball
+                        this.spawnSpecialEnemyFireball(this.enemy.x - 90, this.enemy.y - 33);
+
+                        // When attack animation finishes, return to idle (if still alive)
+                        this.enemy.once('animationcomplete-enemy_attack_two', () => {
+                            if (!this.heroDead && !this.enemyDead) {
+                                this.enemy.play('enemy_idle');
+                            }
+                        });
+
+                    
+                    });
+                });
+                // Reset enemy MP after special move
+				this.enemyMPValue = 0;
+				this.enemyMP.setFrame(this.enemyMPValue);
+            }
+            
 
     }
 
