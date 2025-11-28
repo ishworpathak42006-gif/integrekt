@@ -150,6 +150,13 @@ export class GameScene extends Phaser.Scene {
         this.load.audio('right_sound', 'assets/Sounds/Select.wav');
         this.load.audio('wrong_sound', 'assets/Sounds/Wrong.wav');
 
+        //Pause and Resume button
+        this.load.spritesheet('pause_and_resume_button', 'assets/pause_and_resume.png', {
+            frameWidth: 260, //5 frames, pause=frame 2 (3rd), resume=frame 3 (4th)
+            frameHeight: 217
+        });
+
+
     }
 
     create() {
@@ -166,6 +173,11 @@ export class GameScene extends Phaser.Scene {
         this.enemyHP = 0;
         this.heroMPValue = 0;
         this.enemyMPValue = 0;
+        this.gamePaused = false;
+        this.savedTimeScale = 1;
+        this.timeWasAlreadyPaused = false;
+        this.physicsPausedByUI = false;
+        this.musicWasPausedByUI = false;
 
         // Reset UI frames
         if (this.heroHealth) this.heroHealth.setFrame(this.heroHP);
@@ -727,6 +739,78 @@ export class GameScene extends Phaser.Scene {
         this.clock = this.sound.add('clock');
         this.warningTimer = null;
 
+        //Pause and Resume button setup
+        // Create animations for pause button
+        this.anims.create({
+            key: 'pause_to_resume',
+            frames: this.anims.generateFrameNumbers('pause_and_resume_button', { start: 0, end: 1 }),
+            frameRate: 12,
+            repeat: 0
+        });
+
+        this.anims.create({
+            key: 'resume_to_pause',
+            frames: this.anims.generateFrameNumbers('pause_and_resume_button', { start: 1, end: 0 }),
+            frameRate: 12,
+            repeat: 0
+        });
+
+        // Create pause button sprite (starts at frame 0, which is the 1st frame)
+        const { width } = this.scale;
+        this.pauseButton = this.add
+            .sprite(width / 2, 40, 'pause_and_resume_button', 0)
+            .setOrigin(0.5)
+            .setDepth(60)
+            .setScale(0.25)
+            .setInteractive({ useHandCursor: true });
+
+        this.pauseButton.on('pointerdown', () => {
+            if (!this.gamePaused) {
+                this.enterPauseState();
+            }
+        });
+
+        // Create pause overlay UI
+        this.pauseOverlay = this.add.container(640, 360)
+            .setDepth(80)
+            .setVisible(false);
+
+        const dimmer = this.add.rectangle(0, 0, 1280, 720, 0x000000, 0.55)
+            .setOrigin(0.5)
+            .setInteractive();
+        dimmer.on('pointerdown', (pointer) => {
+            pointer.event?.stopPropagation();
+        });
+
+        const card = this.add.rectangle(0, 0, 460, 240, 0xffffff, 1)
+            .setOrigin(0.5)
+            .setStrokeStyle(4, 0x7AA150);
+
+        const prompt = this.add.text(0, -40, 'Do you want to resume?', {
+            fontFamily: 'JesusHeals',
+            fontSize: 36,
+            color: '#3d2f2f',
+            align: 'center'
+        }).setOrigin(0.5);
+
+        const yesButton = this.add.rectangle(0, 60, 180, 64, 0x7AA150, 1)
+            .setOrigin(0.5)
+            .setInteractive({ useHandCursor: true });
+
+        const yesLabel = this.add.text(0, 60, 'Yes', {
+            fontFamily: 'JesusHeals',
+            fontSize: 32,
+            color: '#ffffff'
+        }).setOrigin(0.5);
+
+        yesButton.on('pointerover', () => yesButton.setFillStyle(0x8bc34a, 1));
+        yesButton.on('pointerout', () => yesButton.setFillStyle(0x7AA150, 1));
+        yesButton.on('pointerup', () => {
+            this.exitPauseState();
+        });
+
+        this.pauseOverlay.add([dimmer, card, prompt, yesButton, yesLabel]);
+
     }
 
     checkGameStatus() {
@@ -1249,8 +1333,111 @@ export class GameScene extends Phaser.Scene {
 
 }
 
+    enterPauseState() {
+        if (this.gamePaused) {
+            return;
+        }
+
+        // Disable button during animation
+        if (this.pauseButton) {
+            this.pauseButton.disableInteractive();
+        }
+
+        // Animate button from frame 0 (1st) to frame 1 (2nd)
+        if (this.pauseButton) {
+            // Play the animation
+            this.pauseButton.play('pause_to_resume');
+            
+            // Calculate animation duration: 1 frame at 12 fps = ~167ms, add buffer for visibility
+            const animationDuration = 300; // 300ms to ensure animation is clearly visible
+            
+            // Wait for animation to complete, then show overlay
+            this.time.delayedCall(animationDuration, () => {
+                if (this.pauseButton) {
+                    this.pauseButton.setFrame(1); // Ensure it's on resume frame
+                }
+                this.showPauseOverlay();
+            });
+        }
+    }
+
+    showPauseOverlay() {
+        // Now that animation is complete, pause the game and show overlay
+        this.gamePaused = true;
+
+        // Show overlay
+        if (this.pauseOverlay) {
+            this.pauseOverlay.setVisible(true);
+        }
+
+        // Pause game systems
+        this.savedTimeScale = this.time.timeScale ?? 1;
+        this.timeWasAlreadyPaused = this.time.paused;
+        this.time.paused = true;
+        this.time.timeScale = 0;
+
+        this.tweens.pauseAll();
+        // Don't pause the pause button animation if it's still playing
+        this.anims.pauseAll();
+
+        if (this.physics && this.physics.world) {
+            this.physicsPausedByUI = !this.physics.world.isPaused;
+            if (this.physicsPausedByUI) {
+                this.physics.world.pause();
+            }
+        } else {
+            this.physicsPausedByUI = false;
+        }
+
+        if (this.gs_themeMusic && this.gs_themeMusic.isPlaying) {
+            this.gs_themeMusic.pause();
+            this.musicWasPausedByUI = true;
+        } else {
+            this.musicWasPausedByUI = false;
+        }
+    }
+
+    exitPauseState() {
+        if (!this.gamePaused) {
+            return;
+        }
+
+        this.gamePaused = false;
+
+        // Resume game systems
+        this.time.paused = this.timeWasAlreadyPaused ?? false;
+        this.time.timeScale = this.savedTimeScale ?? 1;
+
+        this.tweens.resumeAll();
+        this.anims.resumeAll();
+
+        if (this.physics && this.physics.world && this.physicsPausedByUI) {
+            this.physics.world.resume();
+        }
+
+        if (this.musicWasPausedByUI && this.gs_themeMusic) {
+            this.gs_themeMusic.resume();
+        }
+
+        // Hide overlay
+        if (this.pauseOverlay) {
+            this.pauseOverlay.setVisible(false);
+        }
+
+        // Animate button from frame 1 (2nd) back to frame 0 (1st)
+        if (this.pauseButton) {
+            this.pauseButton.play('resume_to_pause');
+            this.pauseButton.once('animationcomplete-resume_to_pause', () => {
+                this.pauseButton.setFrame(0); // Ensure it's on pause frame
+                this.pauseButton.setInteractive({ useHandCursor: true });
+            });
+        }
+    }
 
     update() {
+        if (this.gamePaused) {
+            return;
+        }
         this.bgSky.tilePositionX      += 0.03;
         this.bgClouds.tilePositionX   += 0.07;
         this.bgClouds_2.tilePositionX += 0.12;
