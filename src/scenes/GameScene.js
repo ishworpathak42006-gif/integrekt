@@ -803,13 +803,47 @@ export class GameScene extends Phaser.Scene {
             color: '#ffffff'
         }).setOrigin(0.5);
 
+        // EXIT BUTTON (inline with Yes)
+        const exitButton = this.add.rectangle(100, 60, 180, 64, 0xA84F4F, 1)
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+
+        const exitLabel = this.add.text(100, 60, 'Exit', {
+        fontFamily: 'JesusHeals',
+        fontSize: 32,
+        color: '#ffffff'
+        }).setOrigin(0.5);
+
+        // Hover color change
+        exitButton.on('pointerover', () => exitButton.setFillStyle(0xC55C5C, 1));
+        exitButton.on('pointerout', () => exitButton.setFillStyle(0xA84F4F, 1));
+
+        // Action
+        exitButton.on('pointerup', () => {
+            this.time.paused = false;
+            this.time.timeScale = 1;
+
+            this.tweens.resumeAll();
+            this.anims.resumeAll();
+
+            if (this.physics && this.physics.world) {
+                this.physics.world.resume();
+            }
+            this.fadeOutToScene('Start');   // change to your actual scene name
+        });
+
+        // Reposition YES to the left to match symmetry
+        yesButton.x = -100;
+        yesLabel.x = -100;
+
+
         yesButton.on('pointerover', () => yesButton.setFillStyle(0x8bc34a, 1));
         yesButton.on('pointerout', () => yesButton.setFillStyle(0x7AA150, 1));
         yesButton.on('pointerup', () => {
             this.exitPauseState();
         });
 
-        this.pauseOverlay.add([dimmer, card, prompt, yesButton, yesLabel]);
+        this.pauseOverlay.add([dimmer, card, prompt, yesButton, yesLabel, exitButton, exitLabel]);
 
     }
 
